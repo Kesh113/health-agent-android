@@ -1,6 +1,6 @@
 # Health Agent — Android App
 
-Android app that reads health data from Samsung Health and sends it to a self-hosted AI agent at scheduled times (default: 09:00 and 21:00).
+Android app that reads health data from Samsung Health and sends it to a self-hosted AI agent at scheduled times (default: 09:00 and 21:00). Server URL and schedule are configured inside the app — no secrets in the build.
 
 **Stack:** Samsung Health Data SDK · WorkManager · ClaudeClaw · Telegram
 
@@ -29,7 +29,7 @@ Health Agent app  ──── HTTP POST ────►  health-proxy.py (port 
 |-----------|----------|------|
 | Android app | this repo | Reads Samsung Health, sends to proxy |
 | `health-proxy.py` | VPS `/root/health-proxy.py` | Formats data, signs with HMAC, forwards to ClaudeClaw |
-| ClaudeClaw | VPS `/root/my-assistant/claudeclaw` | Runs AI agent, posts to Telegram |
+| ClaudeClaw | VPS (any path) | Runs AI agent, posts to Telegram |
 
 ---
 
@@ -38,12 +38,20 @@ Health Agent app  ──── HTTP POST ────►  health-proxy.py (port 
 | Type | Period | SDK constant |
 |------|--------|-------------|
 | Steps (count, calories, distance) | 24h | `DataTypes.STEPS` |
-| Heart rate (all measurements) | 24h | `DataTypes.HEART_RATE` |
+| Heart rate (avg/min/max) | 24h | `DataTypes.HEART_RATE` |
+| Blood pressure (systolic/diastolic/pulse) | 24h | `DataTypes.BLOOD_PRESSURE` |
+| Blood oxygen / SpO2 | 24h | `DataTypes.BLOOD_OXYGEN` |
 | Sleep (duration, score) | 24h | `DataTypes.SLEEP` |
+| Floors climbed | 24h | `DataTypes.FLOORS_CLIMBED` |
+| Water intake | 24h | `DataTypes.WATER_INTAKE` |
+| Nutrition (kcal, carbs, protein, fat) | 24h | `DataTypes.NUTRITION` |
+| Blood glucose | 24h | `DataTypes.BLOOD_GLUCOSE` |
+| Weight (kg, height, BMI, body fat %) | 24h | `DataTypes.WEIGHT` |
+| Body temperature | 24h | `DataTypes.BODY_TEMPERATURE` |
+| Skin temperature | 24h | `DataTypes.SKIN_TEMPERATURE` |
 | Exercise sessions | 24h | `DataTypes.EXERCISE` |
-| Blood oxygen (SpO2) | 24h | `DataTypes.BLOOD_OXYGEN` |
 
-Each query is wrapped in `runCatching` — a failure in one type never breaks others.
+Each query is wrapped in `runCatching` — a failure in one type never blocks others.
 
 ---
 
@@ -75,40 +83,29 @@ Enable **"Developer Mode for Data Read"**.
 
 Without this, the SDK returns no data.
 
-### 3. Secrets — local.properties
-
-Copy the example and fill in your values:
-```bash
-cp local.properties.example local.properties
-```
-
-Edit `local.properties`:
-```properties
-health.server.url=http://YOUR_VPS_IP:3200
-health.morning.hour=9
-health.evening.hour=21
-```
-
-`local.properties` is gitignored — **never commit it**.
-
-### 4. Android Studio
+### 3. Android Studio
 
 1. File → Open → select `android-health-app` folder
 2. Gradle sync (wait for it to finish)
 3. Build → Make Project
 
-### 5. Install on device
+### 4. Install on device
 
 ```bash
 ./gradlew installDebug
 ```
 or Run → Run 'app' in Android Studio.
 
-### 6. First launch
+### 5. First launch
 
-1. Tap **"Samsung Health permissions"** → grant Steps, Heart Rate, Sleep, Exercise, Blood Oxygen
-2. Tap **"Send now"** to test
-3. Check the log — you should see data counts and HTTP 200
+1. The app opens **Settings** automatically on first run
+2. Enter your proxy server URL (e.g. `http://YOUR_VPS_IP:3200`) and tap **Сохранить**
+3. Optionally adjust sync schedule hours
+4. Back on the main screen — tap **Разрешения Samsung Health** and grant access
+5. Tap **Отправить сейчас** to send a test payload
+6. Check the log — you should see data counts and HTTP 200
+
+> The server URL is stored in the app's private SharedPreferences — never in source code or build config.
 
 ---
 
@@ -118,8 +115,29 @@ or Run → Run 'app' in Android Studio.
 
 Receives raw JSON from the app, formats it into a human-readable prompt, signs with HMAC-SHA256, and forwards to ClaudeClaw webhook.
 
+```python
+# Minimal example — full version at /root/health-proxy.py on your VPS
+import http.server, json, hmac, hashlib, os, urllib.request
+
+WEBHOOK_SECRET = os.environ["WEBHOOK_SECRET"]
+CLAUDECLAW_URL = f"http://localhost:{os.environ.get('WEBHOOK_PORT', '3100')}/webhook/<your-group>"
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        body = self.rfile.read(int(self.headers["Content-Length"]))
+        data = json.loads(body)
+        prompt = format_prompt(data)      # turn JSON into readable text
+        payload = json.dumps({"prompt": prompt}).encode()
+        sig = hmac.new(WEBHOOK_SECRET.encode(), payload, hashlib.sha256).hexdigest()
+        req = urllib.request.Request(CLAUDECLAW_URL, data=payload,
+              headers={"Content-Type": "application/json", "X-Signature": sig})
+        urllib.request.urlopen(req)
+        self.send_response(200); self.end_headers()
+```
+
+Install as a systemd service — note the `EnvironmentFile` line so it reads `WEBHOOK_SECRET` from ClaudeClaw's `.env` automatically:
+
 ```bash
-# Install as systemd service
 cat > /etc/systemd/system/health-proxy.service << 'EOF'
 [Unit]
 Description=Health Proxy
@@ -128,7 +146,7 @@ After=network.target
 [Service]
 ExecStart=/usr/bin/python3 /root/health-proxy.py
 Restart=always
-EnvironmentFile=/root/my-assistant/claudeclaw/.env
+EnvironmentFile=/path/to/claudeclaw/.env
 
 [Install]
 WantedBy=multi-user.target
@@ -136,8 +154,6 @@ EOF
 
 systemctl enable --now health-proxy.service
 ```
-
-Note the `EnvironmentFile` line — it reads `WEBHOOK_SECRET` from ClaudeClaw's `.env`.
 
 ### ClaudeClaw .env
 
@@ -150,59 +166,13 @@ WEBHOOK_PORT=3100
 ### Test the pipeline
 
 ```bash
-# Generate signature
-SECRET="your-webhook-secret"
-BODY='{"steps":[{"count":8000}]}'
-SIG=$(echo -n "$BODY" | openssl dgst -sha256 -hmac "$SECRET" | awk '{print $2}')
-
-# Send to proxy
-curl -X POST http://localhost:3200 \
+# Send a test payload directly to the proxy
+curl -X POST http://YOUR_VPS_IP:3200 \
   -H "Content-Type: application/json" \
-  -d "$BODY"
+  -d '{"steps":[{"count":8000,"calories":320,"distance":6200}]}'
 ```
 
----
-
-## Adding more data types
-
-Samsung Health Data SDK supports additional types. To add one:
-
-**1. Add permission** in `HealthDataManager.kt`:
-```kotlin
-private val requiredPermissions: Set<Permission> = setOf(
-    // ... existing ...
-    Permission.of(DataTypes.BLOOD_PRESSURE, AccessType.READ),
-)
-```
-
-**2. Add query method**:
-```kotlin
-private suspend fun queryBloodPressure(s: HealthDataStore, filter: LocalTimeFilter): JSONArray {
-    val array = JSONArray()
-    runCatching {
-        val request = DataTypes.BLOOD_PRESSURE.readDataRequestBuilder
-            .setLocalTimeFilter(filter)
-            .build()
-        val result = s.readData(request)
-        result.dataList.forEach { point ->
-            runCatching {
-                array.put(JSONObject().apply {
-                    put("systolic",  point.getValue(DataType.BloodPressureType.SYSTOLIC))
-                    put("diastolic", point.getValue(DataType.BloodPressureType.DIASTOLIC))
-                })
-            }
-        }
-    }.onFailure { Log.w(TAG, "queryBloodPressure failed: ${it.message}") }
-    return array
-}
-```
-
-**3. Call it in `collectAll()`**:
-```kotlin
-safePut("blood_pressure", queryBloodPressure(s, filter))
-```
-
-**4. Handle it in `health-proxy.py`** on the server — add a formatting block in `format_prompt()`.
+A message should arrive in Telegram within a few seconds.
 
 ---
 
@@ -210,13 +180,58 @@ safePut("blood_pressure", queryBloodPressure(s, filter))
 
 | Category | DataTypes constant | DataType fields |
 |----------|--------------------|-----------------|
-| Steps (aggregate) | `DataType.StepsType.TOTAL` | `data.value: Long` |
-| Heart rate | `DataTypes.HEART_RATE` | `DataType.HeartRateType.HEART_RATE/MAX/MIN` |
-| Sleep | `DataTypes.SLEEP` | `DataType.SleepType.DURATION/SLEEP_SCORE/SESSIONS` |
-| Exercise | `DataTypes.EXERCISE` | `DataType.ExerciseType.SESSIONS/EXERCISE_TYPE` |
-| Blood oxygen | `DataTypes.BLOOD_OXYGEN` | `DataType.BloodOxygenType.OXYGEN_SATURATION` |
+| Steps (aggregate) | `DataType.StepsType.TOTAL` | `.value: Long` (use `aggregateData()`) |
+| Heart rate | `DataTypes.HEART_RATE` | `HeartRateType.HEART_RATE / MAX / MIN` |
+| Blood pressure | `DataTypes.BLOOD_PRESSURE` | `BloodPressureType.SYSTOLIC / DIASTOLIC / PULSE` |
+| Blood oxygen | `DataTypes.BLOOD_OXYGEN` | `BloodOxygenType.OXYGEN_SATURATION` |
+| Sleep | `DataTypes.SLEEP` | `SleepType.DURATION / SLEEP_SCORE / SESSIONS` |
+| Floors | `DataTypes.FLOORS_CLIMBED` | `FloorsClimbedType.FLOORS_CLIMBED` |
+| Water | `DataTypes.WATER_INTAKE` | `WaterIntakeType.AMOUNT` |
+| Nutrition | `DataTypes.NUTRITION` | `NutritionType.CALORIE / CARBOHYDRATE / PROTEIN / FAT_TOTAL` |
+| Blood glucose | `DataTypes.BLOOD_GLUCOSE` | `BloodGlucoseType.GLUCOSE` |
+| Weight | `DataTypes.WEIGHT` | `WeightType.WEIGHT / HEIGHT / BODY_MASS_INDEX / BODY_FAT` |
+| Body temperature | `DataTypes.BODY_TEMPERATURE` | `BodyTemperatureType.TEMPERATURE` |
+| Skin temperature | `DataTypes.SKIN_TEMPERATURE` | `SkinTemperatureType.TEMPERATURE` |
+| Exercise | `DataTypes.EXERCISE` | `ExerciseType.SESSIONS` → `ExerciseSession` |
+
+`ExerciseSession` fields: `.startTime`, `.endTime`, `.duration`, `.distance`, `.calories`, `.meanHeartRate`, `.maxHeartRate`
 
 **Steps** use `aggregateData()`, all others use `readData()`.
+
+---
+
+## Adding a new data type
+
+**1. Add permission** in `HealthDataManager.kt`:
+```kotlin
+Permission.of(DataTypes.NEW_TYPE, AccessType.READ),
+```
+
+**2. Add a query method**:
+```kotlin
+private suspend fun queryNewType(s: HealthDataStore, filter: LocalTimeFilter): JSONArray {
+    val array = JSONArray()
+    runCatching {
+        val request = DataTypes.NEW_TYPE.readDataRequestBuilder
+            .setLocalTimeFilter(filter).build()
+        s.readData(request).dataList.forEach { point ->
+            runCatching {
+                array.put(JSONObject().apply {
+                    put("value", point.getValue(DataType.NewType.FIELD))
+                })
+            }
+        }
+    }.onFailure { Log.w(TAG, "queryNewType failed: ${it.message}") }
+    return array
+}
+```
+
+**3. Call it in `collectAll()`**:
+```kotlin
+safePut("new_type", queryNewType(s, filter))
+```
+
+**4. Handle it in `health-proxy.py`** — add a formatting block in `format_prompt()`.
 
 ---
 
@@ -224,12 +239,13 @@ safePut("blood_pressure", queryBloodPressure(s, filter))
 
 | Problem | Fix |
 |---------|-----|
-| App crashes on launch | Check that Samsung Health is installed and running |
-| "No permissions" | Tap permissions button, grant all in Samsung Health dialog |
-| HTTP 502 from server | Check `health-proxy.py` logs: `journalctl -u health-proxy -n 20` |
-| HTTP 401 from server | `WEBHOOK_SECRET` mismatch — ensure `EnvironmentFile` is set in service |
+| App crashes on launch | Samsung Health must be installed and running |
+| "No permissions" | Tap **Разрешения Samsung Health**, grant all in dialog |
+| HTTP 502 from server | Check proxy logs: `journalctl -u health-proxy -n 30` |
+| HTTP 401 from server | `WEBHOOK_SECRET` mismatch — check `EnvironmentFile` in service unit |
 | No data returned | Enable developer mode in Samsung Health (tap version 10 times) |
-| `NoClassDefFoundError: Parceler` | `kotlin-parcelize` plugin missing in `build.gradle.kts` |
+| `NoClassDefFoundError: Parceler` | Add `id("kotlin-parcelize")` plugin to `app/build.gradle.kts` |
+| Settings not saved | SharedPreferences are per-device — re-enter URL after clearing app data |
 
 ---
 
@@ -239,14 +255,17 @@ safePut("blood_pressure", queryBloodPressure(s, filter))
 app/
   libs/                          ← place samsung-health-data-api-*.aar here
   src/main/java/com/artem/healthagent/
-    Config.kt                    ← reads from BuildConfig (set via local.properties)
-    HealthDataManager.kt         ← Samsung Health queries
+    Config.kt                    ← shared constants (work tags, window size)
+    SettingsManager.kt           ← SharedPreferences: URL, schedule hours, sync stats
+    SettingsActivity.kt          ← settings screen (URL input, test, schedule)
+    HealthDataManager.kt         ← Samsung Health queries (13 data types)
     WebhookSender.kt             ← HTTP POST to health-proxy.py
     HealthSyncWorker.kt          ← WorkManager background worker
-    SchedulerManager.kt          ← schedules 09:00 / 21:00 syncs
+    SchedulerManager.kt          ← schedules syncs at user-configured hours
     BootReceiver.kt              ← restores schedule after reboot
-    MainActivity.kt              ← UI with log + "Send now" button
-  src/main/res/xml/
-    network_security_config.xml  ← allows HTTP to your VPS
-local.properties.example         ← copy to local.properties, fill secrets
+    MainActivity.kt              ← main UI: log, send button, settings button
+  src/main/res/
+    layout/activity_main.xml     ← main screen layout
+    layout/activity_settings.xml ← settings screen layout
+    xml/network_security_config.xml  ← allows HTTP (user can enter any URL)
 ```
