@@ -10,10 +10,10 @@ private const val TAG = "HealthSyncWorker"
 
 /**
  * WorkManager worker that:
- * 1. Connects to Samsung Health
- * 2. Collects all data for the last 24h
- * 3. POSTs to health-proxy.py
- * 4. Schedules the next run (self-rescheduling for exact times)
+ * 1. Checks that a server URL is configured
+ * 2. Connects to Samsung Health
+ * 3. Collects all data for the last 24h
+ * 4. POSTs to health-proxy.py
  */
 class HealthSyncWorker(
     context: Context,
@@ -22,35 +22,42 @@ class HealthSyncWorker(
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         Log.i(TAG, "Starting health sync")
-        val mgr = HealthDataManager(applicationContext)
+        val settings = SettingsManager(applicationContext)
 
+        // Guard: URL must be configured
+        if (!settings.isConfigured) {
+            Log.w(TAG, "Server URL not configured — skipping sync")
+            return@withContext Result.failure(
+                workDataOf("error" to "URL не настроен — открой Настройки")
+            )
+        }
+
+        val mgr = HealthDataManager(applicationContext)
         try {
-            // Connect to Samsung Health (synchronous in new SDK, no Activity needed in background)
             val connected = mgr.connectBackground()
             if (!connected) {
                 Log.e(TAG, "Failed to connect to Samsung Health")
                 return@withContext Result.retry()
             }
 
-            // Check permissions
             if (!mgr.hasAllPermissions()) {
                 Log.w(TAG, "Missing Samsung Health permissions")
                 return@withContext Result.failure(
-                    workDataOf("error" to "Missing permissions — open the app to grant them")
+                    workDataOf("error" to "Нет разрешений — открой приложение")
                 )
             }
 
-            // Collect all health data
             Log.i(TAG, "Collecting health data...")
             val data = mgr.collectAll()
             Log.i(TAG, "Collected: ${data.keys().asSequence().toList()}")
 
-            // Send to proxy
-            val sendResult = WebhookSender.send(data)
+            val sendResult = WebhookSender.send(data, settings.serverUrl)
             return@withContext if (sendResult.success) {
+                settings.recordSync(true, sendResult.statusCode)
                 Log.i(TAG, "Sent successfully (HTTP ${sendResult.statusCode})")
                 Result.success()
             } else {
+                settings.recordSync(false, sendResult.statusCode)
                 Log.e(TAG, "Send failed: ${sendResult.error} (HTTP ${sendResult.statusCode})")
                 Result.retry()
             }
@@ -64,9 +71,6 @@ class HealthSyncWorker(
     }
 
     companion object {
-        /**
-         * Enqueue a one-time immediate sync (manual "Send Now")
-         */
         fun runNow(context: Context) {
             val request = OneTimeWorkRequestBuilder<HealthSyncWorker>()
                 .addTag(Config.WORK_TAG_MANUAL)

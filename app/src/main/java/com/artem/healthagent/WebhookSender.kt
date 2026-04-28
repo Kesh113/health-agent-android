@@ -8,6 +8,8 @@ import java.net.URL
 /**
  * POSTs health data JSON to health-proxy.py on the VPS.
  * The proxy handles HMAC signing and forwarding to ClaudeClaw.
+ *
+ * The server URL is read from SettingsManager at call time — no hardcoded URLs.
  */
 object WebhookSender {
 
@@ -17,11 +19,11 @@ object WebhookSender {
         val error: String = ""
     )
 
-    fun send(data: JSONObject): Result {
+    fun send(data: JSONObject, serverUrl: String): Result {
+        if (serverUrl.isBlank()) return Result(success = false, error = "URL не настроен — открой Настройки")
         val body = data.toString()
         return try {
-            val url  = URL(Config.SERVER_URL)
-            val conn = url.openConnection() as HttpURLConnection
+            val conn = URL(serverUrl).openConnection() as HttpURLConnection
             conn.apply {
                 requestMethod          = "POST"
                 doOutput               = true

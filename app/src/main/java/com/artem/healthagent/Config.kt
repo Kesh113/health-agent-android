@@ -1,11 +1,6 @@
 package com.artem.healthagent
 
 object Config {
-    // Injected at build time from local.properties — never hardcode here
-    val SERVER_URL: String get() = BuildConfig.SERVER_URL
-    val MORNING_HOUR: Int  get() = BuildConfig.MORNING_HOUR
-    val EVENING_HOUR: Int  get() = BuildConfig.EVENING_HOUR
-
     const val MORNING_MINUTE = 0
     const val EVENING_MINUTE = 0
 

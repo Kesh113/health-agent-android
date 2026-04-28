@@ -23,13 +23,8 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        // Secrets injected at build time — set in local.properties
-        buildConfigField("String", "SERVER_URL",
-            "\"${localProps.getProperty("health.server.url", "http://YOUR_VPS_IP:3200")}\"")
-        buildConfigField("int", "MORNING_HOUR",
-            localProps.getProperty("health.morning.hour", "9"))
-        buildConfigField("int", "EVENING_HOUR",
-            localProps.getProperty("health.evening.hour", "21"))
+        // Server URL and schedule are configured by the user at runtime via SettingsActivity.
+        // No secrets needed in build config.
     }
 
     buildTypes {

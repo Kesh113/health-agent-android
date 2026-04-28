@@ -6,15 +6,15 @@ import java.util.Calendar
 import java.util.concurrent.TimeUnit
 
 /**
- * Schedules daily health syncs at 09:00 and 21:00.
- * Uses OneTimeWorkRequest with self-rescheduling to hit exact times
- * (PeriodicWorkRequest has ±10min flex which is fine, but this is cleaner).
+ * Schedules daily health syncs at user-configured hours (default 09:00 and 21:00).
+ * Uses OneTimeWorkRequest with self-rescheduling to hit exact times.
  */
 object SchedulerManager {
 
     fun scheduleDailySyncs(context: Context) {
-        scheduleAt(context, Config.MORNING_HOUR, Config.MORNING_MINUTE, Config.WORK_TAG_MORNING)
-        scheduleAt(context, Config.EVENING_HOUR, Config.EVENING_MINUTE, Config.WORK_TAG_EVENING)
+        val settings = SettingsManager(context)
+        scheduleAt(context, settings.morningHour, Config.MORNING_MINUTE, Config.WORK_TAG_MORNING)
+        scheduleAt(context, settings.eveningHour, Config.EVENING_MINUTE, Config.WORK_TAG_EVENING)
     }
 
     fun cancelAll(context: Context) {
@@ -54,11 +54,12 @@ object SchedulerManager {
     }
 
     fun nextSyncDescription(context: Context): String {
-        val morning = msUntilNext(Config.MORNING_HOUR, Config.MORNING_MINUTE)
-        val evening = msUntilNext(Config.EVENING_HOUR, Config.EVENING_MINUTE)
+        val settings = SettingsManager(context)
+        val morning = msUntilNext(settings.morningHour, Config.MORNING_MINUTE)
+        val evening = msUntilNext(settings.eveningHour, Config.EVENING_MINUTE)
         val next    = minOf(morning, evening)
         val h = next / 3_600_000
         val m = (next % 3_600_000) / 60_000
-        return "Следующая синхронизация через ${h}ч ${m}м"
+        return "Следующая синхронизация через ${h}ч ${m}м (${settings.morningHour}:00 и ${settings.eveningHour}:00)"
     }
 }

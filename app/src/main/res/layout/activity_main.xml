@@ -6,13 +6,42 @@
     android:padding="16dp"
     android:background="#0F0F0F">
 
-    <TextView
-        android:layout_width="wrap_content"
+    <!-- Header: title + settings button -->
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Health Agent"
-        android:textSize="24sp"
-        android:textStyle="bold"
-        android:textColor="#FFFFFF"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="4dp">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Health Agent"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:textColor="#FFFFFF" />
+
+        <Button
+            android:id="@+id/btnSettings"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="Настройки"
+            android:textSize="12sp"
+            android:backgroundTint="#222222"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp" />
+    </LinearLayout>
+
+    <!-- Server URL badge -->
+    <TextView
+        android:id="@+id/tvServerUrl"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="⚠ Сервер не настроен — нажми Настройки"
+        android:textColor="#FF9800"
+        android:textSize="12sp"
         android:layout_marginBottom="4dp" />
 
     <TextView

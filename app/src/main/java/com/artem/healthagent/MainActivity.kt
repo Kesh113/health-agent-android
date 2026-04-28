@@ -1,8 +1,10 @@
 package com.artem.healthagent
 
+import android.content.Intent
 import android.os.Bundle
 import android.text.format.DateFormat
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.work.WorkInfo
@@ -17,35 +19,60 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var healthMgr: HealthDataManager
+    private lateinit var settings: SettingsManager
 
     private val logLines = ArrayDeque<String>()
 
+    // Re-read settings and refresh UI after returning from SettingsActivity
+    private val settingsLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        refreshServerBadge()
+        binding.tvSchedule.text = SchedulerManager.nextSyncDescription(this)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityMainBinding.inflate(layoutInflater)
+        binding  = ActivityMainBinding.inflate(layoutInflater)
+        settings = SettingsManager(this)
         setContentView(binding.root)
 
         healthMgr = HealthDataManager(this)
 
+        refreshServerBadge()
         binding.tvSchedule.text = SchedulerManager.nextSyncDescription(this)
 
-        // Connect to Samsung Health (synchronous in new SDK)
+        // Auto-open settings on first launch
+        if (!settings.isConfigured) {
+            settingsLauncher.launch(Intent(this, SettingsActivity::class.java))
+        }
+
+        // Connect to Samsung Health
         val connected = healthMgr.connect(this)
         if (connected) {
             binding.viewDot.setBackgroundResource(R.drawable.dot_green)
             binding.tvConnection.text = "Samsung Health: подключено"
-
             lifecycleScope.launch {
                 val hasPerms = healthMgr.hasAllPermissions()
                 appendLog(if (hasPerms) "✓ Все разрешения получены" else "⚠ Нет разрешений — нажми кнопку ниже")
             }
         } else {
             binding.tvConnection.text = "Samsung Health: ошибка подключения"
-            appendLog("✗ Не удалось подключиться. Убедись что Samsung Health установлен и включён developer mode")
+            appendLog("✗ Samsung Health не найден. Убедись что приложение установлено и включён developer mode")
         }
 
-        // "Send Now" button
+        // Settings button
+        binding.btnSettings.setOnClickListener {
+            settingsLauncher.launch(Intent(this, SettingsActivity::class.java))
+        }
+
+        // Send Now button
         binding.btnSendNow.setOnClickListener {
+            if (!settings.isConfigured) {
+                toast("Сначала настрой URL сервера")
+                settingsLauncher.launch(Intent(this, SettingsActivity::class.java))
+                return@setOnClickListener
+            }
             binding.btnSendNow.isEnabled = false
             binding.btnSendNow.text = "Отправка..."
             lifecycleScope.launch {
@@ -73,6 +100,7 @@ class MainActivity : AppCompatActivity() {
                         WorkInfo.State.SUCCEEDED -> {
                             appendLog("✓ Данные отправлены (фоновый sync)")
                             binding.tvStatus.text = "Последняя синхронизация: ${time()}"
+                            refreshServerBadge()
                         }
                         WorkInfo.State.FAILED -> {
                             val err = info.outputData.getString("error") ?: ""
@@ -84,10 +112,22 @@ class MainActivity : AppCompatActivity() {
             }
     }
 
+    private fun refreshServerBadge() {
+        val url = settings.serverUrl
+        if (url.isBlank()) {
+            binding.tvServerUrl.text = "⚠ Сервер не настроен — нажми Настройки"
+            binding.tvServerUrl.setTextColor(getColor(android.R.color.holo_orange_light))
+        } else {
+            val host = url.removePrefix("https://").removePrefix("http://").trimEnd('/')
+            val syncDesc = settings.lastSyncDescription()
+            binding.tvServerUrl.text = "⇒ $host  ·  $syncDesc"
+            binding.tvServerUrl.setTextColor(0xFF666666.toInt())
+        }
+    }
+
     private suspend fun runManualSync() {
         appendLog("=== Ручная синхронизация ===")
         try {
-            // Samsung Health SDK calls must run on Main thread
             val hasPerms = healthMgr.hasAllPermissions()
             if (!hasPerms) {
                 appendLog("✗ Нет разрешений — нажми 'Разрешения Samsung Health'")
@@ -96,7 +136,6 @@ class MainActivity : AppCompatActivity() {
             }
 
             appendLog("Сбор данных...")
-            // collectAll uses Main thread for Samsung Health, IO only for HTTP
             val data = healthMgr.collectAll()
 
             val keys = data.keys().asSequence().toList()
@@ -106,18 +145,22 @@ class MainActivity : AppCompatActivity() {
                 keys.forEach { key ->
                     val arr = runCatching { data.getJSONArray(key) }.getOrNull()
                     if (arr != null && arr.length() > 0) appendLog("  $key: ${arr.length()} записей")
-                    else if (arr != null) appendLog("  $key: пусто")
+                    else if (arr != null)                appendLog("  $key: пусто")
                 }
             }
 
-            appendLog("Отправка на ${Config.SERVER_URL}...")
-            val result = withContext(Dispatchers.IO) { WebhookSender.send(data) }
+            val serverUrl = settings.serverUrl
+            appendLog("Отправка на $serverUrl...")
+            val result = withContext(Dispatchers.IO) { WebhookSender.send(data, serverUrl) }
 
             if (result.success) {
+                settings.recordSync(true, result.statusCode)
                 appendLog("✓ Отправлено (HTTP ${result.statusCode})")
                 binding.tvStatus.text = "Последняя синхронизация: ${time()}"
                 binding.tvSchedule.text = SchedulerManager.nextSyncDescription(this)
+                refreshServerBadge()
             } else {
+                settings.recordSync(false, result.statusCode)
                 val msg = result.error.ifEmpty { "HTTP ${result.statusCode}" }
                 appendLog("✗ Ошибка отправки: $msg")
                 toast("Ошибка: $msg")

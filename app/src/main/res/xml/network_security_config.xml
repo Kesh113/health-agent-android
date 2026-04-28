@@ -1,11 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    Allow cleartext HTTP globally — the server URL is entered by the user at runtime
+    and may be an HTTP endpoint on a local network or VPS.
+    Users who need strict HTTPS can configure it on their server side.
+-->
 <network-security-config>
-    <!-- Block cleartext globally -->
-    <base-config cleartextTrafficPermitted="false" />
-    <!-- Allow HTTP to our VPS (no HTTPS needed for personal app) -->
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="false">YOUR_VPS_HOST</domain>
-        <!-- Also allow by IP in case DNS fails -->
-        <domain includeSubdomains="false">YOUR_VPS_IP</domain>
-    </domain-config>
+    <base-config cleartextTrafficPermitted="true" />
 </network-security-config>
