@@ -111,13 +111,13 @@ class HealthDataManager(private val context: Context) {
                 .setLocalTimeFilter(filter)
                 .build()
             val result = s.aggregateData(request)
-            result.dataList.forEach { data: AggregatedData ->
-                val count = data.value as? Long ?: 0L
+            result.dataList.forEach { data: AggregatedData<Long> ->
+                val count = data.value ?: 0L
                 if (count > 0) {
                     array.put(JSONObject().apply {
                         put("count",      count)
-                        put("start_time", data.startTime.toEpochMilli())
-                        put("end_time",   data.endTime.toEpochMilli())
+                        put("start_time", data.startTime?.toEpochMilli() ?: 0L)
+                        put("end_time",   data.endTime?.toEpochMilli() ?: 0L)
                     })
                 }
             }
@@ -138,7 +138,7 @@ class HealthDataManager(private val context: Context) {
                     val bpm = point.getValue(DataType.HeartRateType.HEART_RATE) as? Int ?: return@runCatching
                     array.put(JSONObject().apply {
                         put("bpm",       bpm)
-                        put("timestamp", point.startTime.toEpochMilli())
+                        put("timestamp", point.startTime?.toEpochMilli() ?: 0L)
                     })
                 }
             }
@@ -156,36 +156,35 @@ class HealthDataManager(private val context: Context) {
             val result = s.readData(request)
             result.dataList.forEach { point: HealthDataPoint ->
                 runCatching {
-                    val durationObj = point.getValue(DataType.SleepType.DURATION)
-                    val durSec: Long = when (durationObj) {
-                        is java.time.Duration -> durationObj.seconds
-                        is Long               -> durationObj / 1000
-                        else                  -> 0L
-                    }
+                    val durSec: Long = runCatching {
+                        (point.getValue(DataType.SleepType.DURATION) as java.time.Duration).seconds
+                    }.getOrDefault(0L)
                     val score = runCatching {
                         point.getValue(DataType.SleepType.SLEEP_SCORE) as? Int
                     }.getOrNull()
 
+                    // Sleep stages: attempt via SESSIONS list, skip silently if API differs
                     val stagesArray = JSONArray()
                     runCatching {
                         @Suppress("UNCHECKED_CAST")
-                        val sessions = point.getValue(DataType.SleepType.SESSIONS) as? List<HealthDataPoint>
+                        val sessions = point.getValue(DataType.SleepType.SESSIONS) as? List<*>
                         sessions?.forEach { stage ->
                             runCatching {
-                                val stageType = stage.getValue(DataType.SleepType.STAGE)
-                                val stageName = when {
-                                    stageType.toString().contains("AWAKE", ignoreCase = true) -> "awake"
-                                    stageType.toString().contains("LIGHT", ignoreCase = true) -> "light"
-                                    stageType.toString().contains("DEEP",  ignoreCase = true) -> "deep"
-                                    stageType.toString().contains("REM",   ignoreCase = true) -> "rem"
-                                    else -> stageType.toString().lowercase()
-                                }
-                                val stageDur = stage.getValue(DataType.SleepType.DURATION)
-                                val stageSec: Long = when (stageDur) {
-                                    is java.time.Duration -> stageDur.seconds
-                                    is Long               -> stageDur / 1000
-                                    else                  -> 0L
-                                }
+                                val stagePoint = stage as HealthDataPoint
+                                // Stage type — toString() the enum to get AWAKE/LIGHT/DEEP/REM
+                                val stageType = stagePoint.getValue(DataType.SleepType.STAGE_TYPE)
+                                val stageName = stageType?.toString()?.let { t ->
+                                    when {
+                                        t.contains("AWAKE", ignoreCase = true) -> "awake"
+                                        t.contains("LIGHT", ignoreCase = true) -> "light"
+                                        t.contains("DEEP",  ignoreCase = true) -> "deep"
+                                        t.contains("REM",   ignoreCase = true) -> "rem"
+                                        else -> t.lowercase()
+                                    }
+                                } ?: return@runCatching
+                                val stageSec = runCatching {
+                                    (stagePoint.getValue(DataType.SleepType.DURATION) as java.time.Duration).seconds
+                                }.getOrDefault(0L)
                                 stagesArray.put(JSONObject().apply {
                                     put("stage",            stageName)
                                     put("duration_seconds", stageSec)
@@ -195,8 +194,8 @@ class HealthDataManager(private val context: Context) {
                     }
 
                     array.put(JSONObject().apply {
-                        put("start_time",       point.startTime.toEpochMilli())
-                        put("end_time",         point.endTime.toEpochMilli())
+                        put("start_time",       point.startTime?.toEpochMilli() ?: 0L)
+                        put("end_time",         point.endTime?.toEpochMilli() ?: 0L)
                         put("duration_seconds", durSec)
                         if (score != null) put("score", score)
                         if (stagesArray.length() > 0) put("stages", stagesArray)
