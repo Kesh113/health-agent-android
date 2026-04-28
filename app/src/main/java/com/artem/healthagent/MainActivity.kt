@@ -86,39 +86,45 @@ class MainActivity : AppCompatActivity() {
 
     private suspend fun runManualSync() {
         appendLog("=== Ручная синхронизация ===")
-
-        val hasPerms = withContext(Dispatchers.Default) { healthMgr.hasAllPermissions() }
-        if (!hasPerms) {
-            appendLog("✗ Нет разрешений — нажми 'Разрешения Samsung Health'")
-            toast("Сначала выдай разрешения")
-            return
-        }
-
-        appendLog("Сбор данных...")
-        val data = withContext(Dispatchers.IO) { healthMgr.collectAll() }
-
-        // Log what we got
-        val keys = data.keys().asSequence().toList()
-        if (keys.isEmpty()) {
-            appendLog("(нет данных)")
-        } else {
-            keys.forEach { key ->
-                val arr = runCatching { data.getJSONArray(key) }.getOrNull()
-                if (arr != null && arr.length() > 0) appendLog("  $key: ${arr.length()} записей")
+        try {
+            // Samsung Health SDK calls must run on Main thread
+            val hasPerms = healthMgr.hasAllPermissions()
+            if (!hasPerms) {
+                appendLog("✗ Нет разрешений — нажми 'Разрешения Samsung Health'")
+                toast("Сначала выдай разрешения")
+                return
             }
-        }
 
-        appendLog("Отправка на ${Config.SERVER_URL}...")
-        val result = withContext(Dispatchers.IO) { WebhookSender.send(data) }
+            appendLog("Сбор данных...")
+            // collectAll uses Main thread for Samsung Health, IO only for HTTP
+            val data = healthMgr.collectAll()
 
-        if (result.success) {
-            appendLog("✓ Отправлено (HTTP ${result.statusCode})")
-            binding.tvStatus.text = "Последняя синхронизация: ${time()}"
-            binding.tvSchedule.text = SchedulerManager.nextSyncDescription(this)
-        } else {
-            val msg = result.error.ifEmpty { "HTTP ${result.statusCode}" }
-            appendLog("✗ Ошибка: $msg")
-            toast("Ошибка: $msg")
+            val keys = data.keys().asSequence().toList()
+            if (keys.isEmpty()) {
+                appendLog("(нет данных)")
+            } else {
+                keys.forEach { key ->
+                    val arr = runCatching { data.getJSONArray(key) }.getOrNull()
+                    if (arr != null && arr.length() > 0) appendLog("  $key: ${arr.length()} записей")
+                    else if (arr != null) appendLog("  $key: пусто")
+                }
+            }
+
+            appendLog("Отправка на ${Config.SERVER_URL}...")
+            val result = withContext(Dispatchers.IO) { WebhookSender.send(data) }
+
+            if (result.success) {
+                appendLog("✓ Отправлено (HTTP ${result.statusCode})")
+                binding.tvStatus.text = "Последняя синхронизация: ${time()}"
+                binding.tvSchedule.text = SchedulerManager.nextSyncDescription(this)
+            } else {
+                val msg = result.error.ifEmpty { "HTTP ${result.statusCode}" }
+                appendLog("✗ Ошибка отправки: $msg")
+                toast("Ошибка: $msg")
+            }
+        } catch (e: Exception) {
+            appendLog("✗ CRASH: ${e.javaClass.simpleName}: ${e.message}")
+            toast("Ошибка: ${e.message}")
         }
     }
 
