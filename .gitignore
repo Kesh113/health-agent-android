@@ -14,3 +14,4 @@ app/libs/*.aar
 
 # Gradle wrapper (optional — can commit if needed)
 # gradle/wrapper/gradle-wrapper.jar
+\n# Server-side proxy (не для Android-проекта)\nhealth-proxy.py
