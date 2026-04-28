@@ -212,8 +212,8 @@ class HealthDataManager(private val context: Context) {
             // FLOORS_CLIMBED is an aggregate type (like STEPS) — use aggregateData(), not readData()
             val req = DataType.FloorsClimbedType.TOTAL.requestBuilder
                 .setLocalTimeFilter(filter).build()
-            s.aggregateData(req).dataList.forEach { data: AggregatedData<Long> ->
-                val floors = data.value ?: 0L
+            s.aggregateData(req).dataList.forEach { data: AggregatedData<Float> ->
+                val floors = data.value ?: 0f
                 if (floors > 0) array.put(JSONObject().apply {
                     put("count",      floors.toInt())
                     put("start_time", data.startTime?.toEpochMilli() ?: 0L)
