@@ -34,19 +34,18 @@ class HealthDataManager(private val context: Context) {
     // ─── Permissions ──────────────────────────────────────────────────────────
 
     private val requiredPermissions: Set<Permission> = setOf(
-        Permission.of(DataTypes.STEPS,         AccessType.READ),
-        Permission.of(DataTypes.HEART_RATE,    AccessType.READ),
-        Permission.of(DataTypes.SLEEP,         AccessType.READ),
-        Permission.of(DataTypes.EXERCISE,      AccessType.READ),
-        Permission.of(DataTypes.BLOOD_OXYGEN,  AccessType.READ),
-        Permission.of(DataTypes.BLOOD_PRESSURE, AccessType.READ),
-        Permission.of(DataTypes.FLOORS_CLIMBED, AccessType.READ),
-        Permission.of(DataTypes.WATER_INTAKE,  AccessType.READ),
-        Permission.of(DataTypes.BLOOD_GLUCOSE, AccessType.READ),
-        Permission.of(DataTypes.WEIGHT,        AccessType.READ),
-        Permission.of(DataTypes.BODY_TEMPERATURE, AccessType.READ),
+        Permission.of(DataTypes.STEPS,            AccessType.READ),
+        Permission.of(DataTypes.HEART_RATE,       AccessType.READ),
+        Permission.of(DataTypes.SLEEP,            AccessType.READ),
+        Permission.of(DataTypes.EXERCISE,         AccessType.READ),
+        Permission.of(DataTypes.BLOOD_OXYGEN,     AccessType.READ),
+        Permission.of(DataTypes.BLOOD_PRESSURE,   AccessType.READ),
+        Permission.of(DataTypes.FLOORS_CLIMBED,   AccessType.READ),
+        Permission.of(DataTypes.WATER_INTAKE,     AccessType.READ),
+        Permission.of(DataTypes.BLOOD_GLUCOSE,    AccessType.READ),
+        Permission.of(DataTypes.BODY_COMPOSITION, AccessType.READ),
         Permission.of(DataTypes.SKIN_TEMPERATURE, AccessType.READ),
-        Permission.of(DataTypes.NUTRITION,     AccessType.READ),
+        Permission.of(DataTypes.NUTRITION,        AccessType.READ),
     )
 
     // ─── Connection ───────────────────────────────────────────────────────────
@@ -102,9 +101,8 @@ class HealthDataManager(private val context: Context) {
             safePut("water_intake",      queryWater(s, filter))
             safePut("nutrition",         queryNutrition(s, filter))
             safePut("blood_glucose",     queryBloodGlucose(s, filter))
-            // Body
-            safePut("weight",            queryWeight(s, filter))
-            safePut("body_temperature",  queryBodyTemperature(s, filter))
+            // Body composition
+            safePut("body_composition",  queryBodyComposition(s, filter))
             safePut("skin_temperature",  querySkinTemperature(s, filter))
             // Exercise
             safePut("exercise",          queryExercise(s, filter))
@@ -134,7 +132,7 @@ class HealthDataManager(private val context: Context) {
         runCatching {
             val req = DataTypes.HEART_RATE.readDataRequestBuilder
                 .setLocalTimeFilter(filter).setOrdering(Ordering.ASC).build()
-            s.readData(req).dataList.forEach { point ->
+            s.readData(req).dataList.forEach { point: HealthDataPoint ->
                 runCatching {
                     val bpm = point.getValue(DataType.HeartRateType.HEART_RATE)
                     array.put(JSONObject().apply {
@@ -152,12 +150,11 @@ class HealthDataManager(private val context: Context) {
         runCatching {
             val req = DataTypes.BLOOD_PRESSURE.readDataRequestBuilder
                 .setLocalTimeFilter(filter).setOrdering(Ordering.DESC).build()
-            s.readData(req).dataList.forEach { point ->
+            s.readData(req).dataList.forEach { point: HealthDataPoint ->
                 runCatching {
                     array.put(JSONObject().apply {
                         put("systolic",  numericValue(point.getValue(DataType.BloodPressureType.SYSTOLIC)))
                         put("diastolic", numericValue(point.getValue(DataType.BloodPressureType.DIASTOLIC)))
-                        put("pulse",     numericValue(point.getValue(DataType.BloodPressureType.PULSE)))
                         put("timestamp", point.startTime?.toEpochMilli() ?: 0L)
                     })
                 }
@@ -171,7 +168,7 @@ class HealthDataManager(private val context: Context) {
         runCatching {
             val req = DataTypes.BLOOD_OXYGEN.readDataRequestBuilder
                 .setLocalTimeFilter(filter).setOrdering(Ordering.DESC).build()
-            s.readData(req).dataList.forEach { point ->
+            s.readData(req).dataList.forEach { point: HealthDataPoint ->
                 runCatching {
                     val pct = point.getValue(DataType.BloodOxygenType.OXYGEN_SATURATION)
                     array.put(JSONObject().apply {
@@ -189,7 +186,7 @@ class HealthDataManager(private val context: Context) {
         runCatching {
             val req = DataTypes.SLEEP.readDataRequestBuilder
                 .setLocalTimeFilter(filter).setOrdering(Ordering.DESC).build()
-            s.readData(req).dataList.forEach { point ->
+            s.readData(req).dataList.forEach { point: HealthDataPoint ->
                 runCatching {
                     val durSec = runCatching {
                         (point.getValue(DataType.SleepType.DURATION) as java.time.Duration).seconds
@@ -214,9 +211,9 @@ class HealthDataManager(private val context: Context) {
         runCatching {
             val req = DataTypes.FLOORS_CLIMBED.readDataRequestBuilder
                 .setLocalTimeFilter(filter).build()
-            s.readData(req).dataList.forEach { point ->
+            s.readData(req).dataList.forEach { point: HealthDataPoint ->
                 runCatching {
-                    val floors = numericValue(point.getValue(DataType.FloorsClimbedType.FLOORS_CLIMBED))
+                    val floors = numericValue(point.getValue(DataType.FloorsClimbedType.FLOOR))
                     if (floors > 0) array.put(JSONObject().apply {
                         put("count",     floors.toInt())
                         put("timestamp", point.startTime?.toEpochMilli() ?: 0L)
@@ -232,7 +229,7 @@ class HealthDataManager(private val context: Context) {
         runCatching {
             val req = DataTypes.WATER_INTAKE.readDataRequestBuilder
                 .setLocalTimeFilter(filter).build()
-            s.readData(req).dataList.forEach { point ->
+            s.readData(req).dataList.forEach { point: HealthDataPoint ->
                 runCatching {
                     val ml = numericValue(point.getValue(DataType.WaterIntakeType.AMOUNT)) * 1000
                     array.put(JSONObject().apply {
@@ -250,14 +247,14 @@ class HealthDataManager(private val context: Context) {
         runCatching {
             val req = DataTypes.NUTRITION.readDataRequestBuilder
                 .setLocalTimeFilter(filter).build()
-            s.readData(req).dataList.forEach { point ->
+            s.readData(req).dataList.forEach { point: HealthDataPoint ->
                 runCatching {
                     array.put(JSONObject().apply {
-                        put("calories",     numericValue(point.getValue(DataType.NutritionType.CALORIE)))
-                        put("carbs_g",      numericValue(runCatching { point.getValue(DataType.NutritionType.CARBOHYDRATE) }.getOrDefault(0)))
-                        put("protein_g",    numericValue(runCatching { point.getValue(DataType.NutritionType.PROTEIN) }.getOrDefault(0)))
-                        put("fat_g",        numericValue(runCatching { point.getValue(DataType.NutritionType.FAT_TOTAL) }.getOrDefault(0)))
-                        put("timestamp",    point.startTime?.toEpochMilli() ?: 0L)
+                        put("calories",  numericValue(runCatching { point.getValue(DataType.NutritionType.CALORIES) }.getOrDefault(0)))
+                        put("carbs_g",   numericValue(runCatching { point.getValue(DataType.NutritionType.CARBOHYDRATE) }.getOrDefault(0)))
+                        put("protein_g", numericValue(runCatching { point.getValue(DataType.NutritionType.PROTEIN) }.getOrDefault(0)))
+                        put("fat_g",     numericValue(runCatching { point.getValue(DataType.NutritionType.TOTAL_FAT) }.getOrDefault(0)))
+                        put("timestamp", point.startTime?.toEpochMilli() ?: 0L)
                     })
                 }
             }
@@ -270,10 +267,10 @@ class HealthDataManager(private val context: Context) {
         runCatching {
             val req = DataTypes.BLOOD_GLUCOSE.readDataRequestBuilder
                 .setLocalTimeFilter(filter).setOrdering(Ordering.DESC).build()
-            s.readData(req).dataList.forEach { point ->
+            s.readData(req).dataList.forEach { point: HealthDataPoint ->
                 runCatching {
                     array.put(JSONObject().apply {
-                        put("mmol_l",    numericValue(point.getValue(DataType.BloodGlucoseType.GLUCOSE)))
+                        put("mmol_l",    numericValue(point.getValue(DataType.BloodGlucoseType.GLUCOSE_LEVEL)))
                         put("timestamp", point.startTime?.toEpochMilli() ?: 0L)
                     })
                 }
@@ -282,40 +279,23 @@ class HealthDataManager(private val context: Context) {
         return array
     }
 
-    private suspend fun queryWeight(s: HealthDataStore, filter: LocalTimeFilter): JSONArray {
+    private suspend fun queryBodyComposition(s: HealthDataStore, filter: LocalTimeFilter): JSONArray {
         val array = JSONArray()
         runCatching {
-            val req = DataTypes.WEIGHT.readDataRequestBuilder
+            val req = DataTypes.BODY_COMPOSITION.readDataRequestBuilder
                 .setLocalTimeFilter(filter).setOrdering(Ordering.DESC).build()
-            s.readData(req).dataList.forEach { point ->
+            s.readData(req).dataList.forEach { point: HealthDataPoint ->
                 runCatching {
                     array.put(JSONObject().apply {
-                        put("kg",         numericValue(point.getValue(DataType.WeightType.WEIGHT)))
-                        put("height_cm",  numericValue(runCatching { point.getValue(DataType.WeightType.HEIGHT) }.getOrDefault(0)) * 100)
-                        put("bmi",        numericValue(runCatching { point.getValue(DataType.WeightType.BODY_MASS_INDEX) }.getOrDefault(0)))
-                        put("body_fat",   numericValue(runCatching { point.getValue(DataType.WeightType.BODY_FAT) }.getOrDefault(0)))
-                        put("timestamp",  point.startTime?.toEpochMilli() ?: 0L)
-                    })
-                }
-            }
-        }.onFailure { Log.w(TAG, "weight: ${it.message}") }
-        return array
-    }
-
-    private suspend fun queryBodyTemperature(s: HealthDataStore, filter: LocalTimeFilter): JSONArray {
-        val array = JSONArray()
-        runCatching {
-            val req = DataTypes.BODY_TEMPERATURE.readDataRequestBuilder
-                .setLocalTimeFilter(filter).setOrdering(Ordering.DESC).build()
-            s.readData(req).dataList.forEach { point ->
-                runCatching {
-                    array.put(JSONObject().apply {
-                        put("celsius",   numericValue(point.getValue(DataType.BodyTemperatureType.TEMPERATURE)))
+                        put("weight_kg", numericValue(point.getValue(DataType.BodyCompositionType.WEIGHT)))
+                        put("height_cm", numericValue(runCatching { point.getValue(DataType.BodyCompositionType.HEIGHT) }.getOrDefault(0)) * 100)
+                        put("bmi",       numericValue(runCatching { point.getValue(DataType.BodyCompositionType.BODY_MASS_INDEX) }.getOrDefault(0)))
+                        put("body_fat",  numericValue(runCatching { point.getValue(DataType.BodyCompositionType.BODY_FAT) }.getOrDefault(0)))
                         put("timestamp", point.startTime?.toEpochMilli() ?: 0L)
                     })
                 }
             }
-        }.onFailure { Log.w(TAG, "body_temp: ${it.message}") }
+        }.onFailure { Log.w(TAG, "body_composition: ${it.message}") }
         return array
     }
 
@@ -324,10 +304,10 @@ class HealthDataManager(private val context: Context) {
         runCatching {
             val req = DataTypes.SKIN_TEMPERATURE.readDataRequestBuilder
                 .setLocalTimeFilter(filter).setOrdering(Ordering.DESC).build()
-            s.readData(req).dataList.forEach { point ->
+            s.readData(req).dataList.forEach { point: HealthDataPoint ->
                 runCatching {
                     array.put(JSONObject().apply {
-                        put("celsius",   numericValue(point.getValue(DataType.SkinTemperatureType.TEMPERATURE)))
+                        put("celsius",   numericValue(point.getValue(DataType.SkinTemperatureType.SKIN_TEMPERATURE)))
                         put("timestamp", point.startTime?.toEpochMilli() ?: 0L)
                     })
                 }
@@ -367,7 +347,6 @@ class HealthDataManager(private val context: Context) {
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
-    /** Converts Any? (Int/Long/Float/Double) to Double safely. */
     private fun numericValue(v: Any?): Double = when (v) {
         is Int    -> v.toDouble()
         is Long   -> v.toDouble()
