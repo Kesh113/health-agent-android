@@ -209,16 +209,16 @@ class HealthDataManager(private val context: Context) {
     private suspend fun queryFloors(s: HealthDataStore, filter: LocalTimeFilter): JSONArray {
         val array = JSONArray()
         runCatching {
-            val req = DataTypes.FLOORS_CLIMBED.readDataRequestBuilder
+            // FLOORS_CLIMBED is an aggregate type (like STEPS) — use aggregateData(), not readData()
+            val req = DataType.FloorsClimbedType.TOTAL.requestBuilder
                 .setLocalTimeFilter(filter).build()
-            s.readData(req).dataList.forEach { point: HealthDataPoint ->
-                runCatching {
-                    val floors = numericValue(point.getValue(DataType.FloorsClimbedType.FLOOR))
-                    if (floors > 0) array.put(JSONObject().apply {
-                        put("count",     floors.toInt())
-                        put("timestamp", point.startTime?.toEpochMilli() ?: 0L)
-                    })
-                }
+            s.aggregateData(req).dataList.forEach { data: AggregatedData<Long> ->
+                val floors = data.value ?: 0L
+                if (floors > 0) array.put(JSONObject().apply {
+                    put("count",      floors.toInt())
+                    put("start_time", data.startTime?.toEpochMilli() ?: 0L)
+                    put("end_time",   data.endTime?.toEpochMilli() ?: 0L)
+                })
             }
         }.onFailure { Log.w(TAG, "floors: ${it.message}") }
         return array
