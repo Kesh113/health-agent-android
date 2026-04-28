@@ -163,42 +163,11 @@ class HealthDataManager(private val context: Context) {
                         point.getValue(DataType.SleepType.SLEEP_SCORE) as? Int
                     }.getOrNull()
 
-                    // Sleep stages: attempt via SESSIONS list, skip silently if API differs
-                    val stagesArray = JSONArray()
-                    runCatching {
-                        @Suppress("UNCHECKED_CAST")
-                        val sessions = point.getValue(DataType.SleepType.SESSIONS) as? List<*>
-                        sessions?.forEach { stage ->
-                            runCatching {
-                                val stagePoint = stage as HealthDataPoint
-                                // Stage type — toString() the enum to get AWAKE/LIGHT/DEEP/REM
-                                val stageType = stagePoint.getValue(DataType.SleepType.STAGE_TYPE)
-                                val stageName = stageType?.toString()?.let { t ->
-                                    when {
-                                        t.contains("AWAKE", ignoreCase = true) -> "awake"
-                                        t.contains("LIGHT", ignoreCase = true) -> "light"
-                                        t.contains("DEEP",  ignoreCase = true) -> "deep"
-                                        t.contains("REM",   ignoreCase = true) -> "rem"
-                                        else -> t.lowercase()
-                                    }
-                                } ?: return@runCatching
-                                val stageSec = runCatching {
-                                    (stagePoint.getValue(DataType.SleepType.DURATION) as java.time.Duration).seconds
-                                }.getOrDefault(0L)
-                                stagesArray.put(JSONObject().apply {
-                                    put("stage",            stageName)
-                                    put("duration_seconds", stageSec)
-                                })
-                            }
-                        }
-                    }
-
                     array.put(JSONObject().apply {
                         put("start_time",       point.startTime?.toEpochMilli() ?: 0L)
                         put("end_time",         point.endTime?.toEpochMilli() ?: 0L)
-                        put("duration_seconds", durSec)
-                        if (score != null) put("score", score)
-                        if (stagesArray.length() > 0) put("stages", stagesArray)
+                        put("duration_seconds", durSec.toInt())
+                        if (score != null) put("score", score.toInt())
                     })
                 }
             }
