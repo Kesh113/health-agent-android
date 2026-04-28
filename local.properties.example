@@ -1,0 +1,12 @@
+# Copy this file to local.properties and fill in your values.
+# local.properties is gitignored — never commit it.
+
+## Android SDK path (set automatically by Android Studio)
+# sdk.dir=/Users/you/Library/Android/sdk
+
+## Health proxy endpoint — your VPS where health-proxy.py runs
+health.server.url=http://YOUR_VPS_IP:3200
+
+## Daily sync schedule (24h format)
+health.morning.hour=9
+health.evening.hour=21

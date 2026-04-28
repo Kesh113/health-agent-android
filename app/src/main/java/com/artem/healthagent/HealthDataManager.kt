@@ -7,6 +7,7 @@ import com.samsung.android.sdk.health.data.HealthDataService
 import com.samsung.android.sdk.health.data.HealthDataStore
 import com.samsung.android.sdk.health.data.data.AggregatedData
 import com.samsung.android.sdk.health.data.data.HealthDataPoint
+import com.samsung.android.sdk.health.data.data.entries.ExerciseSession
 import com.samsung.android.sdk.health.data.permission.AccessType
 import com.samsung.android.sdk.health.data.permission.Permission
 import com.samsung.android.sdk.health.data.request.DataType
@@ -31,9 +32,11 @@ class HealthDataManager(private val context: Context) {
     // ─── Permissions ──────────────────────────────────────────────────────────
 
     private val requiredPermissions: Set<Permission> = setOf(
-        Permission.of(DataTypes.STEPS,         AccessType.READ),
-        Permission.of(DataTypes.HEART_RATE,    AccessType.READ),
-        Permission.of(DataTypes.SLEEP,         AccessType.READ),
+        Permission.of(DataTypes.STEPS,        AccessType.READ),
+        Permission.of(DataTypes.HEART_RATE,   AccessType.READ),
+        Permission.of(DataTypes.SLEEP,        AccessType.READ),
+        Permission.of(DataTypes.EXERCISE,     AccessType.READ),
+        Permission.of(DataTypes.BLOOD_OXYGEN, AccessType.READ),
     )
 
     // ─── Connection ───────────────────────────────────────────────────────────
@@ -96,9 +99,11 @@ class HealthDataManager(private val context: Context) {
         val filter    = LocalTimeFilter.of(startTime, endTime)
 
         return JSONObject().apply {
-            safePut("steps",            querySteps(s, filter))
-            safePut("heart_rate",       queryHeartRate(s, filter))
-            safePut("sleep",            querySleep(s, filter))
+            safePut("steps",             querySteps(s, filter))
+            safePut("heart_rate",        queryHeartRate(s, filter))
+            safePut("sleep",             querySleep(s, filter))
+            safePut("exercise",          queryExercise(s, filter))
+            safePut("oxygen_saturation", queryBloodOxygen(s, filter))
         }
     }
 
@@ -173,6 +178,89 @@ class HealthDataManager(private val context: Context) {
             }
         }.onFailure { Log.w(TAG, "querySleep failed: ${it.message}") }
         return array
+    }
+
+    private suspend fun queryExercise(s: HealthDataStore, filter: LocalTimeFilter): JSONArray {
+        val array = JSONArray()
+        runCatching {
+            val request = DataTypes.EXERCISE.readDataRequestBuilder
+                .setLocalTimeFilter(filter)
+                .setOrdering(Ordering.DESC)
+                .build()
+            val result = s.readData(request)
+            result.dataList.forEach { point: HealthDataPoint ->
+                runCatching {
+                    @Suppress("UNCHECKED_CAST")
+                    val sessions = point.getValue(DataType.ExerciseType.SESSIONS) as? List<ExerciseSession>
+                    sessions?.forEach { session ->
+                        runCatching {
+                            val typeRaw = runCatching {
+                                point.getValue(DataType.ExerciseType.EXERCISE_TYPE)
+                            }.getOrNull()
+                            val typeName = exerciseTypeName(typeRaw)
+                            val durSec = session.duration?.seconds ?: 0L
+                            val dist   = session.distance ?: 0.0
+                            val cal    = session.calories ?: 0.0
+                            val hrMean = session.meanHeartRate ?: 0
+                            val hrMax  = session.maxHeartRate ?: 0
+                            array.put(JSONObject().apply {
+                                put("type",             typeName)
+                                put("duration_minutes", durSec / 60.0)
+                                put("distance_m",       dist)
+                                put("calories",         cal)
+                                if (hrMean > 0) put("mean_hr", hrMean)
+                                if (hrMax > 0)  put("max_hr",  hrMax)
+                                put("start_time", session.startTime?.toEpochMilli() ?: 0L)
+                            })
+                        }
+                    }
+                }
+            }
+        }.onFailure { Log.w(TAG, "queryExercise failed: ${it.message}") }
+        return array
+    }
+
+    private suspend fun queryBloodOxygen(s: HealthDataStore, filter: LocalTimeFilter): JSONArray {
+        val array = JSONArray()
+        runCatching {
+            val request = DataTypes.BLOOD_OXYGEN.readDataRequestBuilder
+                .setLocalTimeFilter(filter)
+                .setOrdering(Ordering.DESC)
+                .build()
+            val result = s.readData(request)
+            result.dataList.forEach { point: HealthDataPoint ->
+                runCatching {
+                    val spo2 = point.getValue(DataType.BloodOxygenType.OXYGEN_SATURATION)
+                    val pct = when (spo2) {
+                        is Float  -> spo2.toDouble()
+                        is Double -> spo2
+                        else      -> return@runCatching
+                    }
+                    array.put(JSONObject().apply {
+                        put("percentage", pct)
+                        put("timestamp",  point.startTime?.toEpochMilli() ?: 0L)
+                    })
+                }
+            }
+        }.onFailure { Log.w(TAG, "queryBloodOxygen failed: ${it.message}") }
+        return array
+    }
+
+    private fun exerciseTypeName(typeRaw: Any?): String {
+        val code = when (typeRaw) {
+            is Int  -> typeRaw
+            is Long -> typeRaw.toInt()
+            else    -> return typeRaw?.toString() ?: "Unknown"
+        }
+        return when (code) {
+            1000 -> "Walking";   1001 -> "Running";     1002 -> "Cycling"
+            1003 -> "Swimming";  1004 -> "Hiking";       1005 -> "Elliptical"
+            1006 -> "Rowing";    2001 -> "Strength";     2002 -> "Yoga"
+            2003 -> "Pilates";   3001 -> "Basketball";   3002 -> "Soccer"
+            3003 -> "Tennis";    3004 -> "Golf";         4001 -> "Skiing"
+            4002 -> "Snowboard"; 5001 -> "Dance";        6001 -> "Jump rope"
+            else -> "Exercise ($code)"
+        }
     }
 
     // ─── Helper ───────────────────────────────────────────────────────────────

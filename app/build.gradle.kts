@@ -1,7 +1,15 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     id("kotlin-parcelize") // Required by Samsung Health Data SDK internal Parcelable usage
+}
+
+// Load secrets from local.properties (gitignored)
+val localProps = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) load(f.inputStream())
 }
 
 android {
@@ -14,6 +22,14 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
+
+        // Secrets injected at build time — set in local.properties
+        buildConfigField("String", "SERVER_URL",
+            "\"${localProps.getProperty("health.server.url", "http://YOUR_VPS_IP:3200")}\"")
+        buildConfigField("int", "MORNING_HOUR",
+            localProps.getProperty("health.morning.hour", "9"))
+        buildConfigField("int", "EVENING_HOUR",
+            localProps.getProperty("health.evening.hour", "21"))
     }
 
     buildTypes {
@@ -33,6 +49,7 @@ android {
 
     buildFeatures {
         viewBinding = true
+        buildConfig = true
     }
 }
 
