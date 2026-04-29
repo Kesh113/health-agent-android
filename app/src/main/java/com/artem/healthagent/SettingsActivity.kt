@@ -22,6 +22,7 @@ class SettingsActivity : AppCompatActivity() {
         binding  = ActivitySettingsBinding.inflate(layoutInflater)
         settings = SettingsManager(this)
         setContentView(binding.root)
+        setSupportActionBar(binding.toolbar)
         supportActionBar?.title = "Настройки"
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
 
