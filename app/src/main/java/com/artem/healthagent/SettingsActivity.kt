@@ -23,6 +23,7 @@ class SettingsActivity : AppCompatActivity() {
         settings = SettingsManager(this)
         setContentView(binding.root)
         supportActionBar?.title = "Настройки"
+        supportActionBar?.setDisplayHomeAsUpEnabled(true)
 
         loadCurrent()
         setupButtons()
@@ -100,6 +101,11 @@ class SettingsActivity : AppCompatActivity() {
             binding.tvStats.text    = settings.lastSyncDescription()
             Toast.makeText(this, "Статистика сброшена", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    override fun onSupportNavigateUp(): Boolean {
+        finish()
+        return true
     }
 
     private data class TestResult(val ok: Boolean, val message: String)
