@@ -231,7 +231,7 @@ class HealthDataManager(private val context: Context) {
                 .setLocalTimeFilter(filter).build()
             s.readData(req).dataList.forEach { point: HealthDataPoint ->
                 runCatching {
-                    val ml = numericValue(point.getValue(DataType.WaterIntakeType.AMOUNT)) * 1000
+                    val ml = numericValue(point.getValue(DataType.WaterIntakeType.AMOUNT))
                     array.put(JSONObject().apply {
                         put("ml",        ml.toLong())
                         put("timestamp", point.startTime?.toEpochMilli() ?: 0L)
